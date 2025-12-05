@@ -3,9 +3,12 @@ import { useAuth } from '../context/AuthContext';
 import { enhanceImageWithGemini } from '../services/geminiService';
 import { deductCredit, saveEnhancementRecord, addCredits, getGuestCredits, deductGuestCredit } from '../services/mockDb';
 import { ComparisonSlider } from '../components/ComparisonSlider';
-import { Upload, Zap, Loader2, Play, Lock, UserPlus } from 'lucide-react';
+import { Upload, Zap, Loader2, Play, Lock, UserPlus, Download } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AD_WATCH_REWARD, MAX_AD_REWARDS } from '../constants';
+import { PlanType } from '../types';
+import { AdOverlay } from '../components/AdOverlay';
+import { BannerAd } from '../components/BannerAd';
 
 export const Home: React.FC = () => {
   const { user, refreshUser } = useAuth();
@@ -17,14 +20,43 @@ export const Home: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adsWatched, setAdsWatched] = useState(0);
-  const [isWatchingAd, setIsWatchingAd] = useState(false);
   const [guestCredits, setGuestCredits] = useState<number>(0);
+
+  // Forced Ad State
+  const [showForcedAd, setShowForcedAd] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const [adActionName, setAdActionName] = useState("");
 
   useEffect(() => {
     if (!user) {
         setGuestCredits(getGuestCredits());
     }
-  }, [user, enhancedImage]); // Refresh when image processed or user changes
+  }, [user, enhancedImage]);
+
+  // Helper to determine if user needs to see ads (Starter or Guest)
+  const shouldShowAd = () => {
+      if (!user) return true; // Guest always sees ads
+      return user.plan === PlanType.FREE;
+  };
+
+  // The Gatekeeper for actions
+  const executeWithAdGate = (action: () => void, actionName: string) => {
+      if (shouldShowAd()) {
+          setAdActionName(actionName);
+          setPendingAction(() => action);
+          setShowForcedAd(true);
+      } else {
+          action();
+      }
+  };
+
+  const handleAdComplete = () => {
+      setShowForcedAd(false);
+      if (pendingAction) {
+          pendingAction();
+          setPendingAction(null);
+      }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -41,6 +73,14 @@ export const Home: React.FC = () => {
       };
       reader.readAsDataURL(file);
     }
+    // Reset value so same file can be selected again
+    e.target.value = ''; 
+  };
+
+  const handleUploadClick = () => {
+      executeWithAdGate(() => {
+          fileInputRef.current?.click();
+      }, "Upload");
   };
 
   const handleEnhance = async () => {
@@ -62,71 +102,102 @@ export const Home: React.FC = () => {
 
     if (!originalImage) return;
 
-    setIsProcessing(true);
-    setError(null);
+    // Wrap the actual API call in the ad gate
+    executeWithAdGate(async () => {
+        setIsProcessing(true);
+        setError(null);
 
-    try {
-      // API Call
-      const resultBase64 = await enhanceImageWithGemini(originalImage);
-      setEnhancedImage(resultBase64);
-      
-      if (user) {
-          deductCredit(user.id);
-          saveEnhancementRecord({
-              id: crypto.randomUUID(),
-              userId: user.id,
-              originalImage: originalImage,
-              enhancedImage: resultBase64,
-              createdAt: new Date().toISOString()
-          });
-          refreshUser();
-      } else {
-          deductGuestCredit();
-          setGuestCredits(prev => prev - 1);
-      }
-      
-    } catch (err: any) {
-      setError(err.message || "Failed to enhance image. Please try again.");
-    } finally {
-      setIsProcessing(false);
-    }
+        try {
+            // API Call
+            const resultBase64 = await enhanceImageWithGemini(originalImage);
+            setEnhancedImage(resultBase64);
+            
+            if (user) {
+                deductCredit(user.id);
+                saveEnhancementRecord({
+                    id: crypto.randomUUID(),
+                    userId: user.id,
+                    originalImage: originalImage,
+                    enhancedImage: resultBase64,
+                    createdAt: new Date().toISOString()
+                });
+                refreshUser();
+            } else {
+                deductGuestCredit();
+                setGuestCredits(prev => prev - 1);
+            }
+        
+        } catch (err: any) {
+            setError(err.message || "Failed to enhance image. Please try again.");
+        } finally {
+            setIsProcessing(false);
+        }
+    }, "Enhance");
   };
 
-  const handleWatchAd = () => {
+  const handleDownload = (e: React.MouseEvent) => {
+      e.preventDefault(); // Stop default download
+      if (!enhancedImage) return;
+
+      executeWithAdGate(() => {
+          // Programmatic download
+          const link = document.createElement('a');
+          link.href = enhancedImage;
+          link.download = 'enhanced-ravelon.png';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+      }, "Download");
+  };
+
+  // Rewritten to force Ad Overlay before granting credit
+  const handleWatchRewardAd = () => {
     if (!user) return;
-    setIsWatchingAd(true);
     
-    // Simulate Ad duration
-    setTimeout(() => {
+    // Define the action that runs ONLY after the ad finishes
+    const grantCreditAction = () => {
         addCredits(user.id, AD_WATCH_REWARD);
         refreshUser();
         setAdsWatched(prev => prev + 1);
-        setIsWatchingAd(false);
         setError(null); // Clear any "no credits" errors
-    }, 3000);
+    };
+
+    // Trigger the forced ad overlay
+    setAdActionName("Claim Credit");
+    setPendingAction(() => grantCreditAction);
+    setShowForcedAd(true);
   };
 
   const handleDrop = (e: React.DragEvent) => {
       e.preventDefault();
+      // Even drag and drop triggers the ad gate
       const file = e.dataTransfer.files?.[0];
       if (file) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            setOriginalImage(ev.target?.result as string);
-            setEnhancedImage(null);
-            setError(null);
-        };
-        reader.readAsDataURL(file);
+        executeWithAdGate(() => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                setOriginalImage(ev.target?.result as string);
+                setEnhancedImage(null);
+                setError(null);
+            };
+            reader.readAsDataURL(file);
+        }, "Upload");
       }
   };
 
-  // Check if blocked (either 0 user credits OR 0 guest credits)
   const isGuestBlocked = !user && guestCredits <= 0;
   const isUserBlocked = user && user.credits <= 0;
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       
+      {/* Forced Ad Overlay */}
+      <AdOverlay 
+        isOpen={showForcedAd} 
+        onComplete={handleAdComplete} 
+        actionName={adActionName} 
+      />
+
       {/* Header */}
       <div className="text-center space-y-4">
         <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary to-green-300">
@@ -144,23 +215,23 @@ export const Home: React.FC = () => {
           </div>
       )}
 
-      {/* Credit Alert (Logged In) */}
+      {/* Credit Alert (Logged In) - Logic for watching ads to gain credit */}
       {isUserBlocked && !enhancedImage && (
-        <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 animate-fade-in">
           <div className="flex items-center text-red-400">
             <Lock className="mr-2" />
             <span>0 Credits remaining today.</span>
           </div>
           <div className="flex gap-2">
              <button 
-                onClick={handleWatchAd}
-                disabled={adsWatched >= MAX_AD_REWARDS || isWatchingAd}
-                className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm flex items-center transition-colors disabled:opacity-50"
+                onClick={handleWatchRewardAd}
+                disabled={adsWatched >= MAX_AD_REWARDS}
+                className="bg-primary hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm flex items-center transition-colors disabled:opacity-50 disabled:bg-gray-700 font-bold shadow-lg"
              >
-                {isWatchingAd ? <Loader2 className="animate-spin mr-2 h-4 w-4"/> : <Play className="mr-2 h-4 w-4" />}
-                Watch Ad (+1)
+                <Play className="mr-2 h-4 w-4" />
+                {adsWatched >= MAX_AD_REWARDS ? 'Daily Ad Limit Reached' : 'Watch Ad (+1 Credit)'}
              </button>
-             <Link to="/pricing" className="bg-primary hover:bg-green-600 px-4 py-2 rounded-lg text-white text-sm font-bold">
+             <Link to="/pricing" className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-white text-sm font-bold">
                 Upgrade
              </Link>
           </div>
@@ -191,7 +262,7 @@ export const Home: React.FC = () => {
         {!originalImage ? (
           <div 
             className="border-2 border-dashed border-gray-600 rounded-xl p-12 flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-gray-700/50 transition-all"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleUploadClick}
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
           >
@@ -207,6 +278,11 @@ export const Home: React.FC = () => {
             </div>
             <h3 className="text-xl font-bold mb-2">Click to Upload</h3>
             <p className="text-gray-400 text-sm">or drag and drop an image here</p>
+            {shouldShowAd() && (
+                <span className="mt-2 text-[10px] text-gray-500 bg-gray-800 px-2 py-0.5 rounded border border-gray-600">
+                    Ad supported
+                </span>
+            )}
           </div>
         ) : (
           <div className="space-y-6">
@@ -220,7 +296,7 @@ export const Home: React.FC = () => {
                 {isProcessing && (
                   <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-20">
                     <Loader2 className="animate-spin text-primary h-12 w-12 mb-4" />
-                    <p className="text-green-400 font-medium animate-pulse">Enhancing details with Gemini...</p>
+                    <p className="text-green-400 font-medium animate-pulse">Loading... Please wait.</p>
                   </div>
                 )}
               </div>
@@ -257,13 +333,13 @@ export const Home: React.FC = () => {
                )}
 
                {enhancedImage && (
-                   <a 
-                    href={enhancedImage} 
-                    download="enhanced-ravelon.png"
-                    className="bg-white text-dark px-6 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors"
+                   <button
+                    onClick={handleDownload}
+                    className="bg-white text-dark px-6 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors flex items-center"
                    >
+                       <Download className="mr-2 h-5 w-5" />
                        Download HD
-                   </a>
+                   </button>
                )}
             </div>
             
@@ -275,6 +351,11 @@ export const Home: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Banner Ad Area - Only for Starter Users */}
+      {shouldShowAd() && (
+        <BannerAd />
+      )}
     </div>
   );
 };
