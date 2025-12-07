@@ -16,8 +16,8 @@ export const PLANS: PricingPlan[] = [
     name: 'Pro Monthly',
     price: 'R150',
     period: 'month',
-    creditsPerDay: 10000,
-    features: ['Unlimited Enhancements daily', 'High priority processing', 'No ads', 'Premium badge']
+    creditsPerDay: 50, // Strictly 50 credits
+    features: ['50 Enhancements daily', 'Magic Prompt Editing', 'High priority processing', 'No ads', 'Premium badge']
   },
   {
     id: PlanType.PREMIUM_YEARLY,
@@ -25,7 +25,7 @@ export const PLANS: PricingPlan[] = [
     price: 'R500',
     period: 'year',
     creditsPerDay: 10000,
-    features: ['Best Value', 'Unlimited Enhancements daily', 'High priority processing', 'No ads', 'Chat with Admin', 'Premium badge']
+    features: ['Best Value', 'Unlimited Enhancements daily', 'Magic Prompt Editing', 'High priority processing', 'No ads', 'Chat with Admin', 'Premium badge']
   }
 ];
 

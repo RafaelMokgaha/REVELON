@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { enhanceImageWithGemini } from '../services/geminiService';
 import { deductCredit, saveEnhancementRecord, addCredits, getGuestCredits, deductGuestCredit } from '../services/mockDb';
 import { ComparisonSlider } from '../components/ComparisonSlider';
-import { Upload, Zap, Loader2, Play, Lock, UserPlus, Download } from 'lucide-react';
+import { Upload, Zap, Loader2, Play, Lock, UserPlus, Download, Wand2, Sparkles } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AD_WATCH_REWARD, MAX_AD_REWARDS } from '../constants';
 import { PlanType } from '../types';
@@ -21,6 +21,9 @@ export const Home: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [adsWatched, setAdsWatched] = useState(0);
   const [guestCredits, setGuestCredits] = useState<number>(0);
+  
+  // Magic Editor State
+  const [prompt, setPrompt] = useState("");
 
   // Forced Ad State
   const [showForcedAd, setShowForcedAd] = useState(false);
@@ -38,6 +41,8 @@ export const Home: React.FC = () => {
       if (!user) return true; // Guest always sees ads
       return user.plan === PlanType.FREE;
   };
+
+  const isPro = user && (user.plan === PlanType.PREMIUM_MONTHLY || user.plan === PlanType.PREMIUM_YEARLY);
 
   // The Gatekeeper for actions
   const executeWithAdGate = (action: () => void, actionName: string) => {
@@ -70,6 +75,7 @@ export const Home: React.FC = () => {
         setOriginalImage(ev.target?.result as string);
         setEnhancedImage(null);
         setError(null);
+        setPrompt(""); // Reset prompt on new file
       };
       reader.readAsDataURL(file);
     }
@@ -108,8 +114,8 @@ export const Home: React.FC = () => {
         setError(null);
 
         try {
-            // API Call
-            const resultBase64 = await enhanceImageWithGemini(originalImage);
+            // API Call with custom prompt if active
+            const resultBase64 = await enhanceImageWithGemini(originalImage, prompt);
             setEnhancedImage(resultBase64);
             
             if (user) {
@@ -179,6 +185,7 @@ export const Home: React.FC = () => {
                 setOriginalImage(ev.target?.result as string);
                 setEnhancedImage(null);
                 setError(null);
+                setPrompt("");
             };
             reader.readAsDataURL(file);
         }, "Upload");
@@ -302,13 +309,52 @@ export const Home: React.FC = () => {
               </div>
             )}
 
+            {/* Magic Editor Input - PRO Only */}
+            {!enhancedImage && originalImage && (
+                <div className="relative">
+                     <div className="flex items-center justify-between mb-2">
+                        <label className="text-sm font-bold text-gray-300 flex items-center">
+                            <Sparkles className="w-4 h-4 mr-2 text-purple-400" />
+                            Magic Editor 
+                            <span className="ml-2 text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full border border-purple-500/30">PRO</span>
+                        </label>
+                     </div>
+                     
+                     <div className="relative">
+                        <textarea
+                            value={prompt}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            disabled={!isPro || isProcessing}
+                            placeholder={isPro 
+                                ? "Describe changes (e.g., 'Swap red shirt for blue suit', 'Remove background', 'Add sunglasses')..." 
+                                : "Upgrade to Pro to describe custom edits..."}
+                            className={`w-full bg-dark/50 border rounded-xl px-4 py-3 text-sm focus:outline-none transition-all resize-none h-24
+                                ${isPro 
+                                    ? 'border-gray-600 focus:border-purple-500 text-white' 
+                                    : 'border-gray-800 text-gray-600 cursor-not-allowed'}`}
+                        />
+                        
+                        {/* Lock Overlay for Non-Pro */}
+                        {!isPro && (
+                            <div className="absolute inset-0 bg-darker/60 flex flex-col items-center justify-center rounded-xl backdrop-blur-[1px] border border-gray-700/50">
+                                <Lock className="text-gray-400 mb-2 h-6 w-6" />
+                                <Link to="/pricing" className="flex items-center text-white font-bold bg-purple-600 px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors shadow-lg text-sm">
+                                    Unlock Magic Editor
+                                </Link>
+                            </div>
+                        )}
+                     </div>
+                </div>
+            )}
+
             {/* Controls */}
-            <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
+            <div className="flex flex-col md:flex-row gap-4 justify-between items-center pt-2">
                <button 
                  onClick={() => {
                      setOriginalImage(null); 
                      setEnhancedImage(null);
                      setError(null);
+                     setPrompt("");
                  }}
                  className="text-gray-400 hover:text-white text-sm underline"
                  disabled={isProcessing}
@@ -321,21 +367,23 @@ export const Home: React.FC = () => {
                     onClick={handleEnhance}
                     disabled={isProcessing || isUserBlocked || isGuestBlocked}
                     className={`
-                        flex items-center justify-center px-8 py-3 rounded-xl font-bold text-lg shadow-lg
+                        flex items-center justify-center px-8 py-3 rounded-xl font-bold text-lg shadow-lg w-full md:w-auto
                         ${isProcessing || isUserBlocked || isGuestBlocked
                             ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
                             : 'bg-primary hover:bg-green-600 text-white transform hover:scale-105 transition-all'}
                     `}
                  >
-                    <Zap className="mr-2" />
-                    {isProcessing ? 'Processing...' : `Enhance Image (${!user ? 'Guest' : '-1 Credit'})`}
+                    {prompt.length > 0 ? <Sparkles className="mr-2 h-5 w-5" /> : <Zap className="mr-2 h-5 w-5" />}
+                    {isProcessing ? 'Processing...' : prompt.length > 0 ? 'Magic Edit' : 'Enhance'}
+                    {!user && !isProcessing && ' (Guest)'}
+                    {user && !isProcessing && ' (-1 Credit)'}
                  </button>
                )}
 
                {enhancedImage && (
                    <button
                     onClick={handleDownload}
-                    className="bg-white text-dark px-6 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors flex items-center"
+                    className="bg-white text-dark px-6 py-3 rounded-xl font-bold hover:bg-gray-200 transition-colors flex items-center w-full md:w-auto justify-center"
                    >
                        <Download className="mr-2 h-5 w-5" />
                        Download HD

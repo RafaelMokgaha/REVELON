@@ -9,7 +9,7 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-export const enhanceImageWithGemini = async (base64Image: string): Promise<string> => {
+export const enhanceImageWithGemini = async (base64Image: string, customPrompt?: string): Promise<string> => {
   const ai = getClient();
   
   // Using Gemini 3 Pro Image Preview for high quality editing
@@ -29,13 +29,19 @@ export const enhanceImageWithGemini = async (base64Image: string): Promise<strin
        data = base64Image.replace(/^data:image\/\w+;base64,/, '');
   }
 
+  // Determine prompt strategy
+  const defaultPrompt = "Enhance photo quality, sharpen image, improve lighting, smooth skin lightly, keep natural and realistic. Output the result as an image.";
+  const finalPrompt = customPrompt && customPrompt.trim().length > 0 
+    ? `${customPrompt}. Ensure the output is high quality and photorealistic. Output the result as an image.` 
+    : defaultPrompt;
+
   try {
     const response = await ai.models.generateContent({
       model: model,
       contents: {
         parts: [
           {
-            text: "Enhance photo quality, sharpen image, improve lighting, smooth skin lightly, keep natural and realistic. Output the result as an image."
+            text: finalPrompt
           },
           {
             inlineData: {

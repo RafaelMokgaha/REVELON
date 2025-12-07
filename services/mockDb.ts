@@ -102,9 +102,10 @@ export const upgradeUserPlan = (userId: string, plan: PlanType): User | null => 
   if (index === -1) return null;
 
   users[index].plan = plan;
-  // Reset credits to the new plan's limit immediately upon upgrade
-  const newLimit = getCreditsForPlan(plan);
-  users[index].credits = Math.max(users[index].credits, newLimit);
+  
+  // STRICTLY set credits to the new plan's limit immediately upon upgrade/downgrade.
+  // This prevents keeping 10,000 credits if switching from Yearly to Monthly.
+  users[index].credits = getCreditsForPlan(plan);
   
   saveUsers(users);
   return users[index];
